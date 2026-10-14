@@ -89,22 +89,7 @@ python -m http.server 8000
 
 ---
 
-## 4. Chạy trên điện thoại
-
-Điện thoại chỉ cho dùng camera khi trang chạy qua **https**, nên mở
-`http://<IP máy tính>:8000` từ điện thoại sẽ **không** dùng được camera. Có hai cách:
-
-- **GitHub Pages:** đổi repo sang **Public**, rồi vào **Settings → Pages**, chọn
-  *Deploy from a branch*, nhánh `main`, thư mục `/ (root)` → **Save**. Sau 1–2 phút trang
-  chạy ở `https://woofwoof-alt.github.io/human_heart_web/`, mở được trên mọi điện thoại.
-  (GitHub Pages miễn phí không chạy với repo riêng tư.)
-- **Tạm thời trên Chrome Android:** vào `chrome://flags/#unsafely-treat-insecure-origin-as-secure`,
-  thêm địa chỉ `http://<IP máy tính>:8000`, bật **Enabled** rồi khởi động lại Chrome.
-  Máy tính và điện thoại phải cùng mạng Wi-Fi.
-
----
-
-## 5. Gặp lỗi?
+## 4. Gặp lỗi?
 
 | Hiện tượng | Cách xử lý |
 |---|---|
