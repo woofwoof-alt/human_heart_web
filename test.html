@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>Thử image tracking</title>
+  <link rel="icon" href="data:,">
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+    #ar { position: fixed; inset: 0; overflow: hidden; }
+    #status {
+      position: fixed; left: 12px; bottom: 12px; z-index: 10;
+      padding: 8px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.75);
+      color: #ffd76a; font: 15px system-ui, sans-serif;
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three":
+        "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/":
+        "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+      "mindar-image":
+        "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js",
+      "mindar-image-three":
+        "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="ar"></div>
+  <div id="status">Đang khởi động...</div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { Compiler } from 'mindar-image';
+    import { MindARThree } from 'mindar-image-three';
+
+    const status = document.getElementById('status');
+
+    // 1. Chuyển ảnh marker JPG thành dữ liệu đặc trưng cho MindAR
+    const img = new Image();
+    img.src = 'assets/Markers/heart_marker2.jpg';
+    await img.decode();
+    const compiler = new Compiler();
+    await compiler.compileImageTargets([img], (p) => {
+      status.textContent = `Đang chuẩn bị marker... ${Math.round(p)}%`;
+    });
+    const targets = compiler.exportData();
+
+    // 2. Tạo MindAR, gắn khối lập phương lên marker số 0
+    const mindar = new MindARThree({
+      container: document.getElementById('ar'),
+      imageTargetSrc: URL.createObjectURL(new Blob([targets])),
+    });
+    const anchor = mindar.addAnchor(0);
+    // Cạnh 0.25 đơn vị = 1/4 chiều rộng ảnh (khoảng 5 cm khi in A4)
+    const cube = new THREE.Mesh(
+      new THREE.BoxGeometry(0.25, 0.25, 0.25),
+      new THREE.MeshNormalMaterial()
+    );
+    cube.position.z = 0.125;   // nâng nửa cạnh để khối nằm trên mặt giấy
+    anchor.group.add(cube);
+    anchor.onTargetFound = () => { status.textContent = 'Thấy marker!'; };
+    anchor.onTargetLost = () => { status.textContent = 'Mất dấu marker.'; };
+
+    // 3. Mở webcam và vẽ liên tục
+    status.textContent = 'Đang mở webcam...';
+    await mindar.start();
+    status.textContent = 'Đưa marker vào trước webcam.';
+    mindar.renderer.setAnimationLoop(() => {
+      mindar.renderer.render(mindar.scene, mindar.camera);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trái tim 3D</title>
+  <link rel="icon" href="data:,">
+  <style>
+    html, body {
+      margin: 0; height: 100%; overflow: hidden;
+      background: radial-gradient(circle at 50% 40%, #2a2d3a, #0b0c10);
+      color: #eee; font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+    }
+    #view { position: fixed; inset: 0; touch-action: none; cursor: grab; }
+    #view:active { cursor: grabbing; }
+    #label {
+      position: absolute; left: 0; top: 0; z-index: 3; pointer-events: none;
+      padding: 5px 12px; border-left: 5px solid #fff; border-radius: 6px;
+      background: rgba(0, 0, 0, 0.75); color: #fff;
+      font-size: 16px; font-weight: 600; white-space: nowrap;
+    }
+    #panel {
+      position: fixed; left: 12px; bottom: 12px; z-index: 10;
+      max-width: min(360px, calc(100vw - 24px)); box-sizing: border-box;
+      padding: 10px 14px; border-radius: 10px;
+      background: rgba(15, 15, 20, 0.8); font-size: 14px; line-height: 1.4;
+    }
+    #panel h1 { margin: 0 0 4px; font-size: 16px; }
+    #status { margin: 0 0 6px; color: #ffd76a; }
+    #help { margin: 0 0 8px; padding-left: 18px; }
+    #parts {
+      display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px;
+      padding: 0; list-style: none;
+    }
+    #parts button {
+      padding: 3px 8px; border: 0; border-left: 4px solid; border-radius: 4px;
+      background: rgba(255, 255, 255, 0.1); color: #eee;
+      font: 12px system-ui, sans-serif; cursor: pointer;
+    }
+    #parts button.on { background: rgba(255, 255, 255, 0.3); }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .row button, .row a {
+      padding: 6px 12px; border: 0; border-radius: 6px;
+      background: #2f6fde; color: #fff; font: inherit; cursor: pointer;
+      text-decoration: none;
+    }
+    .row a { background: #444a5c; }
+    label.chk { font-size: 13px; }
+    .credit { margin: 8px 0 0; font-size: 12px; color: #aaa; }
+    .credit a { color: #aaa; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three":
+        "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/":
+        "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="view">
+    <div id="label" hidden></div>
+  </div>
+
+  <div id="panel">
+    <h1>Trái tim 3D</h1>
+    <p id="status">Đang tải mô hình tim...</p>
+    <ul id="help">
+      <li>Kéo chuột trái (hoặc một ngón): xoay</li>
+      <li>Lăn chuột (hoặc chụm hai ngón): phóng to / thu nhỏ</li>
+      <li>Kéo chuột phải (hoặc hai ngón): dời</li>
+      <li>Bấm chấm màu hoặc tên bên dưới: xem bộ phận</li>
+    </ul>
+    <ul id="parts"></ul>
+    <div class="row">
+      <button id="reset" type="button">Đặt lại góc nhìn</button>
+      <label class="chk"><input id="spin" type="checkbox"> Tự xoay</label>
+      <a href="./">Chế độ AR (webcam)</a>
+    </div>
+    <p class="credit">
+      Mô hình tim:
+      <a href="https://sketchfab.com/3d-models/human-heart-3d-model-anatomy-medical-project-5da08bb137014f0392c69f9997f777cd"
+         target="_blank" rel="noopener">Human Heart 3D Model</a>
+      của Mesh-Magnet, giấy phép CC BY 4.0
+    </p>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { HEART_MESH_MATRIX, HEART_CENTER, HOTSPOTS } from './heart-data.js';
+
+    const MODEL_URL = 'assets/Models/heart.glb';
+    const DOT_RADIUS = 0.02, HIT_RADIUS = 0.06, SELECTED_SCALE = 1.6;
+    const TAP_MAX_MS = 350, TAP_MAX_MOVE = 8;
+
+    const container = document.getElementById('view');
+    const labelEl = document.getElementById('label');
+    const statusEl = document.getElementById('status');
+    const partsEl = document.getElementById('parts');
+    const spinEl = document.getElementById('spin');
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 50);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 2));
+    const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+    sun.position.set(0.5, 1, 2);
+    camera.add(sun);   // đèn đi theo camera: mặt nào đang nhìn cũng sáng
+    scene.add(camera);
+
+    // Dùng lại hệ toạ độ marker của heart-data.js: mặt trước tim hướng +z,
+    // mạch máu lớn hướng +y. Nhìn từ +z là thấy mặt trước, tim đứng thẳng.
+    const target = new THREE.Vector3().fromArray(HEART_CENTER);
+    const HOME = target.clone().add(new THREE.Vector3(0, 0, 2.4));
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.minDistance = 0.6;
+    controls.maxDistance = 6;
+    controls.autoRotateSpeed = 2;
+
+    function resetView() {
+      camera.position.copy(HOME);
+      controls.target.copy(target);
+      controls.update();
+      select(null);
+    }
+
+    function resize() {
+      const w = container.clientWidth, h = container.clientHeight;
+      renderer.setSize(w, h);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+    let heart = null;
+    const spots = [];
+    let selected = null;
+
+    addEventListener('resize', resize);
+    resize();
+    resetView();
+
+    function select(spot) {
+      if (selected) {
+        selected.dot.scale.setScalar(1);
+        selected.btn.classList.remove('on');
+      }
+      selected = spot;
+      if (spot) {
+        spot.dot.scale.setScalar(SELECTED_SCALE);
+        spot.btn.classList.add('on');
+        labelEl.textContent = spot.label;
+        labelEl.style.borderLeftColor = spot.css;
+      }
+    }
+
+    try {
+      const gltf = await new GLTFLoader().loadAsync(MODEL_URL, (e) => {
+        if (e.total) statusEl.textContent =
+          `Đang tải mô hình tim... ${Math.round(e.loaded / e.total * 100)}%`;
+      });
+      // HEART_MESH_MATRIX đo trên chính lưới tim: tách lưới khỏi các node của
+      // Sketchfab (xoay, scale, dời) rồi mới đặt ma trận
+      gltf.scene.traverse((o) => { if (o.isMesh && !heart) heart = o; });
+      heart.removeFromParent();
+      heart.matrixAutoUpdate = false;
+      heart.matrix.fromArray(HEART_MESH_MATRIX);
+      scene.add(heart);
+      statusEl.textContent = 'Đã tải xong.';
+    } catch (e) {
+      console.error(e);
+      statusEl.textContent = 'Không tải được ' + MODEL_URL +
+        '. Hãy mở trang qua web server (start.bat).';
+    }
+
+    // 12 chấm màu và nút tên tương ứng
+    const dotGeo = new THREE.SphereGeometry(DOT_RADIUS, 16, 12);
+    const hitGeo = new THREE.SphereGeometry(HIT_RADIUS, 12, 8);
+    const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+    for (const h of HOTSPOTS) {
+      const color = new THREE.Color().setRGB(...h.color, THREE.SRGBColorSpace);
+      const dot = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color }));
+      dot.position.fromArray(h.position);
+      const hit = new THREE.Mesh(hitGeo, hitMat);
+      dot.add(hit);
+      scene.add(dot);
+
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = h.label;
+      btn.style.borderLeftColor = color.getStyle();
+      li.appendChild(btn);
+      partsEl.appendChild(li);
+
+      const spot = { label: h.label, css: color.getStyle(), dot, hit, btn };
+      hit.userData.spot = spot;
+      btn.addEventListener('click', () => select(selected === spot ? null : spot));
+      spots.push(spot);
+    }
+
+    // Bấm nhanh (không kéo) = chọn chấm; lưới tim chặn chấm ở mặt sau
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    let down = null;
+    container.addEventListener('pointerdown', (e) => {
+      if (e.isPrimary) down = { x: e.clientX, y: e.clientY, t: performance.now() };
+    });
+    container.addEventListener('pointerup', (e) => {
+      if (!e.isPrimary || !down) return;
+      const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+      const quick = performance.now() - down.t < TAP_MAX_MS;
+      down = null;
+      if (!quick || moved > TAP_MAX_MOVE) return;
+      const rect = container.getBoundingClientRect();
+      ndc.set((e.clientX - rect.left) / rect.width * 2 - 1,
+              -(e.clientY - rect.top) / rect.height * 2 + 1);
+      raycaster.setFromCamera(ndc, camera);
+      const objs = [...spots.map((s) => s.hit)];
+      if (heart) objs.unshift(heart);
+      const spot = raycaster.intersectObjects(objs, true)[0]?.object.userData.spot ?? null;
+      select(spot === selected ? null : spot);
+    });
+
+    document.getElementById('reset').addEventListener('click', resetView);
+    spinEl.addEventListener('change', () => { controls.autoRotate = spinEl.checked; });
+
+    const v = new THREE.Vector3();
+    renderer.setAnimationLoop(() => {
+      controls.update();
+      renderer.render(scene, camera);
+      if (!selected) { labelEl.hidden = true; return; }
+      selected.dot.getWorldPosition(v).project(camera);
+      const x = (v.x + 1) / 2 * container.clientWidth;
+      const y = (1 - v.y) / 2 * container.clientHeight;
+      labelEl.style.transform = `translate(${x + 14}px, ${y}px) translate(0, -50%)`;
+      labelEl.hidden = false;
+    });
+  </script>
+</body>
+</html>
